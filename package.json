@@ -1,18 +1,18 @@
 {
-  "name": "my-scraper-api",
+  "name": "data-bot-api",
   "version": "1.0.0",
-  "description": "Puppeteer scraper API",
+  "description": "Puppeteer Scraper API for Render",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^24.16.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "puppeteer-core": "^24.16.2",
+    "chrome-aws-lambda": "^20.2.1"
   },
-  "keywords": ["scraper", "puppeteer", "api"],
+  "keywords": ["scraper", "puppeteer", "api", "render"],
   "author": "",
   "license": "ISC",
   "type": "commonjs"
