@@ -1,13 +1,13 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
 const cors = require("cors");
+const chromium = require("chrome-aws-lambda");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 // -------------------------
-// Puppeteer helper functions
+// Puppeteer functions
 // -------------------------
 async function extractEmailFromWebsite(browser, url) {
   try {
@@ -61,12 +61,16 @@ app.post("/scrape", async (req, res) => {
   const country = "Canada";
   const scrapedAt = new Date().toISOString();
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await chromium.puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath,
+    headless: chromium.headless,
+  });
 
   try {
     const page = await browser.newPage();
 
-    // ---------- 1. Google Maps ----------
+    // ---------- Google Maps ----------
     const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}/`;
     await page.goto(mapsUrl, { waitUntil: "networkidle2" });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
@@ -79,7 +83,7 @@ app.post("/scrape", async (req, res) => {
         const rating = el.querySelector(".MW4etd")?.textContent.trim() || "N/A";
 
         return {
-          BusinessName: title, // <-- added field
+          BusinessName: title,
           Industry: description.includes("restaurant") ? "Restaurant" : description,
           City: city,
           "Title / Business": title,
@@ -94,7 +98,7 @@ app.post("/scrape", async (req, res) => {
       });
     }, scrapedAt, city);
 
-    // ---------- 2. YellowPages ----------
+    // ---------- YellowPages ----------
     const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(query)}`;
     await page.goto(ypUrl, { waitUntil: "networkidle2" });
 
@@ -108,7 +112,7 @@ app.post("/scrape", async (req, res) => {
           const phone = el.querySelector(".mlr__item--phone")?.textContent.trim() || "N/A";
 
           return {
-            BusinessName: title, // <-- added field
+            BusinessName: title,
             Industry: "Business",
             City: city,
             "Title / Business": title,
@@ -123,7 +127,6 @@ app.post("/scrape", async (req, res) => {
         });
       }, scrapedAt, city);
 
-      // Extract email & phone from websites
       for (let biz of ypResults) {
         if (biz.URL && biz.URL.startsWith("http")) {
           const extracted = await extractEmailFromWebsite(browser, biz.URL);
@@ -133,7 +136,7 @@ app.post("/scrape", async (req, res) => {
       }
     } catch {}
 
-    // ---------- 3. Merge & Deduplicate ----------
+    // ---------- Merge & Deduplicate ----------
     const combined = [...mapsResults, ...ypResults];
     const finalResults = [];
     const seen = new Set();
@@ -145,7 +148,7 @@ app.post("/scrape", async (req, res) => {
       }
     }
 
-    // ---------- 4. Fallback ----------
+    // ---------- Fallback ----------
     for (let biz of finalResults) {
       if (biz.Email === "N/A" || biz.Phone === "N/A" || biz.URL === "N/A") {
         const fallback = await searchGoogleForWebsite(browser, biz.BusinessName, biz.City, country);
@@ -164,5 +167,5 @@ app.post("/scrape", async (req, res) => {
 });
 
 // ---------- Start Server ----------
-const PORT = process.env.PORT || 3000;
+const PORT = https://data-bot-3hrl.onrender.com/ || 3000;
 app.listen(PORT, () => console.log(`🚀 Scraper API running on port ${PORT}`));
