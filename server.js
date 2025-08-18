@@ -1,13 +1,13 @@
 const express = require("express");
 const cors = require("cors");
-const chromium = require("chrome-aws-lambda");
+const puppeteer = require("puppeteer-core");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 // -------------------------
-// Puppeteer functions
+// Puppeteer helper functions
 // -------------------------
 async function extractEmailFromWebsite(browser, url) {
   try {
@@ -42,7 +42,7 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
       await page.close();
       return { website, email: extracted.email, phone: extracted.phone };
     }
-  } catch (err) {
+  } catch {
     console.log("⚠️ Google fallback failed:", businessName);
   }
 
@@ -61,10 +61,11 @@ app.post("/scrape", async (req, res) => {
   const country = "Canada";
   const scrapedAt = new Date().toISOString();
 
-  const browser = await chromium.puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath,
-    headless: chromium.headless,
+  // Launch Puppeteer using system-installed Chrome
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome", // Use default Render Chrome path
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -86,7 +87,6 @@ app.post("/scrape", async (req, res) => {
           BusinessName: title,
           Industry: description.includes("restaurant") ? "Restaurant" : description,
           City: city,
-          "Title / Business": title,
           URL: url,
           Rank: index + 1,
           Source: "Google Maps",
@@ -115,7 +115,6 @@ app.post("/scrape", async (req, res) => {
             BusinessName: title,
             Industry: "Business",
             City: city,
-            "Title / Business": title,
             URL: website,
             Rank: index + 1,
             Source: "YellowPages",
@@ -166,6 +165,8 @@ app.post("/scrape", async (req, res) => {
   }
 });
 
-// ---------- Start Server ----------
-const PORT = https://data-bot-3hrl.onrender.com/ || 3000;
+// -------------------------
+// Start server
+// -------------------------
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Scraper API running on port ${PORT}`));
