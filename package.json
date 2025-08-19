@@ -18,7 +18,9 @@
     "express": "^4.18.2",
     "install": "^0.13.0",
     "npx": "^10.2.2",
-    "puppeteer": "^24.16.2"
+    "playwright": "^1.54.2",
+    "puppeteer": "^24.16.2",
+    "puppeteer-extra": "^3.3.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
