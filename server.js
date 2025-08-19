@@ -1,14 +1,12 @@
+// server.js
 const express = require("express");
-const cors = require("cors");
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer");
+const fs = require("fs");
 
 const app = express();
-app.use(express.json());
-app.use(cors());
+const PORT = process.env.PORT || 3000;
 
-// -------------------------
-// Puppeteer helper functions
-// -------------------------
+// Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
   try {
     const page = await browser.newPage();
@@ -19,12 +17,16 @@ async function extractEmailFromWebsite(browser, url) {
     const phoneMatch = content.match(/(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}/);
 
     await page.close();
-    return { email: emailMatch ? emailMatch[0] : "N/A", phone: phoneMatch ? phoneMatch[0] : "N/A" };
-  } catch (err) {
+    return {
+      email: emailMatch ? emailMatch[0] : "N/A",
+      phone: phoneMatch ? phoneMatch[0] : "N/A",
+    };
+  } catch {
     return { email: "N/A", phone: "N/A" };
   }
 }
 
+// Fallback Google search
 async function searchGoogleForWebsite(browser, businessName, city, country = "Canada") {
   const page = await browser.newPage();
   const query = encodeURIComponent(`${businessName} ${city} ${country}`);
@@ -50,29 +52,30 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
   return { website: "N/A", email: "N/A", phone: "N/A" };
 }
 
-// -------------------------
-// API Endpoint
-// -------------------------
-app.post("/scrape", async (req, res) => {
-  const { query } = req.body;
-  if (!query) return res.status(400).json({ error: "Missing search query" });
+// MAIN ROUTE
+app.get("/scrape", async (req, res) => {
+  const searchQuery = req.query.query;
+  if (!searchQuery) {
+    return res.status(400).json({ error: "Missing query parameter ?query=" });
+  }
 
-  const city = query.split("in ")[1] || "N/A";
+  const city = searchQuery.split("in ")[1] || "N/A";
   const country = "Canada";
   const scrapedAt = new Date().toISOString();
 
-  // Launch Puppeteer using system-installed Chrome
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome", // Use default Render Chrome path
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
+  let browser;
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
     const page = await browser.newPage();
 
-    // ---------- Google Maps ----------
-    const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}/`;
+    // ==========================
+    // 🔹 Google Maps
+    // ==========================
+    const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}/`;
+    console.log(`📍 Scraping Google Maps: ${mapsUrl}`);
     await page.goto(mapsUrl, { waitUntil: "networkidle2" });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
 
@@ -84,9 +87,9 @@ app.post("/scrape", async (req, res) => {
         const rating = el.querySelector(".MW4etd")?.textContent.trim() || "N/A";
 
         return {
-          BusinessName: title,
           Industry: description.includes("restaurant") ? "Restaurant" : description,
           City: city,
+          "Title / Business": title,
           URL: url,
           Rank: index + 1,
           Source: "Google Maps",
@@ -98,8 +101,11 @@ app.post("/scrape", async (req, res) => {
       });
     }, scrapedAt, city);
 
-    // ---------- YellowPages ----------
-    const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(query)}`;
+    // ==========================
+    // 🔹 YellowPages
+    // ==========================
+    const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchQuery)}`;
+    console.log(`📞 Scraping YellowPages: ${ypUrl}`);
     await page.goto(ypUrl, { waitUntil: "networkidle2" });
 
     let ypResults = [];
@@ -108,14 +114,15 @@ app.post("/scrape", async (req, res) => {
       ypResults = await page.evaluate((scrapedAt, city) => {
         return Array.from(document.querySelectorAll(".listing__content")).map((el, index) => {
           const title = el.querySelector(".listing__name--link")?.textContent.trim() || "N/A";
-          const website = el.querySelector(".mlr__item--website a")?.href || el.querySelector(".listing__name--link")?.href || "N/A";
+          const profileUrl = el.querySelector(".listing__name--link")?.href || "N/A";
           const phone = el.querySelector(".mlr__item--phone")?.textContent.trim() || "N/A";
+          const website = el.querySelector(".mlr__item--website a")?.href || "N/A";
 
           return {
-            BusinessName: title,
             Industry: "Business",
             City: city,
-            URL: website,
+            "Title / Business": title,
+            URL: website !== "N/A" ? website : profileUrl,
             Rank: index + 1,
             Source: "YellowPages",
             ScrapedAt: scrapedAt,
@@ -126,6 +133,7 @@ app.post("/scrape", async (req, res) => {
         });
       }, scrapedAt, city);
 
+      // Visit each site for email/phone
       for (let biz of ypResults) {
         if (biz.URL && biz.URL.startsWith("http")) {
           const extracted = await extractEmailFromWebsite(browser, biz.URL);
@@ -133,40 +141,43 @@ app.post("/scrape", async (req, res) => {
           if (extracted.phone !== "N/A") biz.Phone = extracted.phone;
         }
       }
-    } catch {}
+    } catch {
+      console.log("⚠️ No YellowPages results found or structure changed.");
+    }
 
-    // ---------- Merge & Deduplicate ----------
+    // ==========================
+    // 🔹 Merge + Deduplicate
+    // ==========================
     const combined = [...mapsResults, ...ypResults];
     const finalResults = [];
     const seen = new Set();
     for (let biz of combined) {
-      const key = biz.BusinessName + biz.City;
+      const key = biz["Title / Business"] + biz.City;
       if (!seen.has(key)) {
         seen.add(key);
         finalResults.push(biz);
       }
     }
 
-    // ---------- Fallback ----------
+    // ==========================
+    // 🔹 Fallback Search
+    // ==========================
     for (let biz of finalResults) {
       if (biz.Email === "N/A" || biz.Phone === "N/A" || biz.URL === "N/A") {
-        const fallback = await searchGoogleForWebsite(browser, biz.BusinessName, biz.City, country);
+        const fallback = await searchGoogleForWebsite(browser, biz["Title / Business"], biz.City, country);
         if (fallback.website !== "N/A") biz.URL = fallback.website;
         if (fallback.email !== "N/A") biz.Email = fallback.email;
         if (fallback.phone !== "N/A") biz.Phone = fallback.phone;
       }
     }
 
-    await browser.close();
-    res.json({ results: finalResults });
+    res.json({ count: finalResults.length, results: finalResults });
   } catch (err) {
-    await browser.close();
-    res.status(500).json({ error: "Scraping failed", details: err.message });
+    console.error("❌ Error during scraping:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (browser) await browser.close();
   }
 });
 
-// -------------------------
-// Start server
-// -------------------------
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Scraper API running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
