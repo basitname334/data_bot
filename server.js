@@ -3,8 +3,8 @@ const puppeteer = require("puppeteer");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const HOST = "0.0.0.0"; // Required for Render
+const PORT = process.env.PORT; // Render provides PORT, no fallback needed
+const HOST = "0.0.0.0"; // Bind to all interfaces for Render
 
 app.use(cors());
 
@@ -205,6 +205,7 @@ app.get("/scrape", async (req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`🚀 Server running on http://${HOST}:${PORT}`);
 }).on("error", (err) => {
-  console.error("❌ Server failed to start:", err.message);
+  console.error(`❌ Server failed to start: ${err.message}`);
+  console.error("Check that PORT and HOST are correctly set. Current values:", { PORT, HOST });
   process.exit(1);
 });
