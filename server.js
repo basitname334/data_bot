@@ -1,9 +1,13 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
 const fs = require("fs");
+const path = require("path"); // Add path module for serving static files
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Serve static files from the "public" directory
+app.use(express.static(path.join(__dirname, "public")));
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {

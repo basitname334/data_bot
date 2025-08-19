@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Business Scraper</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f4f4f4;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .search-container {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    input[type="text"] {
+      padding: 10px;
+      width: 300px;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background-color: white;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    th, td {
+      padding: 12px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #007bff;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    .error {
+      color: red;
+      text-align: center;
+      margin-top: 20px;
+    }
+    .loading {
+      text-align: center;
+      font-style: italic;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Business Scraper</h1>
+  <div class="search-container">
+    <input type="text" id="searchQuery" placeholder="e.g., restaurants in Toronto" />
+    <button onclick="scrape()">Search</button>
+  </div>
+  <div id="loading" class="loading" style="display: none;">Loading...</div>
+  <div id="error" class="error"></div>
+  <table id="resultsTable" style="display: none;">
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Business</th>
+        <th>City</th>
+        <th>Industry</th>
+        <th>Source</th>
+        <th>URL</th>
+        <th>Phone</th>
+        <th>Email</th>
+        <th>Rating</th>
+        <th>Scraped At</th>
+      </tr>
+    </thead>
+    <tbody id="resultsBody"></tbody>
+  </table>
+
+  <script>
+    async function scrape() {
+      const query = document.getElementById("searchQuery").value.trim();
+      const errorDiv = document.getElementById("error");
+      const loadingDiv = document.getElementById("loading");
+      const resultsTable = document.getElementById("resultsTable");
+      const resultsBody = document.getElementById("resultsBody");
+
+      if (!query) {
+        errorDiv.textContent = "Please enter a search query.";
+        return;
+      }
+
+      errorDiv.textContent = "";
+      loadingDiv.style.display = "block";
+      resultsTable.style.display = "none";
+      resultsBody.innerHTML = "";
+
+      try {
+        // Use relative path for local testing; update to Render URL for production
+        const response = await fetch(`/scrape?query=${encodeURIComponent(query)}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        if (data.count === 0) {
+          errorDiv.textContent = "No results found.";
+        } else {
+          data.results.forEach((result) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${result.Rank}</td>
+              <td>${result["Title / Business"]}</td>
+              <td>${result.City}</td>
+              <td>${result.Industry}</td>
+              <td>${result.Source}</td>
+              <td><a href="${result.URL}" target="_blank">${result.URL}</a></td>
+              <td>${result.Phone}</td>
+              <td>${result.Email}</td>
+              <td>${result.Rating}</td>
+              <td>${result.ScrapedAt}</td>
+            `;
+            resultsBody.appendChild(row);
+          });
+          resultsTable.style.display = "table";
+        }
+      } catch (err) {
+        errorDiv.textContent = `Error: ${err.message}`;
+      } finally {
+        loadingDiv.style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>
