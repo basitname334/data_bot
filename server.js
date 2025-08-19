@@ -1,10 +1,10 @@
 // server.js
 const express = require("express");
 const puppeteer = require("puppeteer");
+const fs = require("fs");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || "https://data-bot-3hrl.onrender.com";
+const PORT = https://data-bot-3hrl.onrender.com/ || 3000;
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -52,17 +52,7 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
   return { website: "N/A", email: "N/A", phone: "N/A" };
 }
 
-// Root route (API guide)
-app.get("/", (req, res) => {
-  res.send(`
-    <h2>🚀 Puppeteer Scraper API</h2>
-    <p>Use the endpoint below to scrape business data:</p>
-    <pre><code>${BASE_URL}/scrape?query=restaurants in Vernon</code></pre>
-    <p>Replace <b>restaurants in Vernon</b> with your own search.</p>
-  `);
-});
-
-// Scraper route
+// MAIN ROUTE
 app.get("/scrape", async (req, res) => {
   const searchQuery = req.query.query;
   if (!searchQuery) {
@@ -77,17 +67,8 @@ app.get("/scrape", async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-zygote",
-        "--single-process"
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/google-chrome"
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
-
     const page = await browser.newPage();
 
     // ==========================
@@ -152,6 +133,7 @@ app.get("/scrape", async (req, res) => {
         });
       }, scrapedAt, city);
 
+      // Visit each site for email/phone
       for (let biz of ypResults) {
         if (biz.URL && biz.URL.startsWith("http")) {
           const extracted = await extractEmailFromWebsite(browser, biz.URL);
@@ -198,7 +180,4 @@ app.get("/scrape", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running at ${BASE_URL}`);
-  console.log(`Try it now: ${BASE_URL}/scrape?query=restaurants in Vernon`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
