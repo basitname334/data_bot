@@ -1,10 +1,10 @@
-// server.js
 const express = require("express");
 const puppeteer = require("puppeteer");
-const fs = require("fs");
+const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.use(cors());
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -21,7 +21,8 @@ async function extractEmailFromWebsite(browser, url) {
       email: emailMatch ? emailMatch[0] : "N/A",
       phone: phoneMatch ? phoneMatch[0] : "N/A",
     };
-  } catch {
+  } catch (err) {
+    console.error(`⚠️ Error extracting from ${url}:`, err.message);
     return { email: "N/A", phone: "N/A" };
   }
 }
@@ -31,9 +32,10 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
   const page = await browser.newPage();
   const query = encodeURIComponent(`${businessName} ${city} ${country}`);
   const googleUrl = `https://www.google.com/search?q=${query}`;
-  await page.goto(googleUrl, { waitUntil: "networkidle2" });
 
   try {
+    await page.goto(googleUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
     const website = await page.evaluate(() => {
       const link = document.querySelector("a[href^='http']");
       return link ? link.href : null;
@@ -44,8 +46,8 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
       await page.close();
       return { website, email: extracted.email, phone: extracted.phone };
     }
-  } catch {
-    console.log("⚠️ Google fallback failed:", businessName);
+  } catch (err) {
+    console.error(`⚠️ Google fallback failed for ${businessName}:`, err.message);
   }
 
   await page.close();
@@ -65,19 +67,15 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
+    // Launch browser with optional executable path
+    const browserOptions = {
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-zygote",
-        "--single-process",
-      ],
-      executablePath: puppeteer.executablePath(), // ✅ FIX: auto-detect Chromium
-    });
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use bundled Chromium if not set
+    };
 
+    console.log("Launching browser with options:", browserOptions);
+    browser = await puppeteer.launch(browserOptions);
     const page = await browser.newPage();
 
     // ==========================
@@ -85,7 +83,7 @@ app.get("/scrape", async (req, res) => {
     // ==========================
     const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}/`;
     console.log(`📍 Scraping Google Maps: ${mapsUrl}`);
-    await page.goto(mapsUrl, { waitUntil: "networkidle2" });
+    await page.goto(mapsUrl, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
 
     const mapsResults = await page.evaluate((scrapedAt, city) => {
@@ -115,7 +113,7 @@ app.get("/scrape", async (req, res) => {
     // ==========================
     const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchQuery)}`;
     console.log(`📞 Scraping YellowPages: ${ypUrl}`);
-    await page.goto(ypUrl, { waitUntil: "networkidle2" });
+    await page.goto(ypUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
     let ypResults = [];
     try {
@@ -150,8 +148,8 @@ app.get("/scrape", async (req, res) => {
           if (extracted.phone !== "N/A") biz.Phone = extracted.phone;
         }
       }
-    } catch {
-      console.log("⚠️ No YellowPages results found or structure changed.");
+    } catch (err) {
+      console.error("⚠️ No YellowPages results found or structure changed:", err.message);
     }
 
     // ==========================
@@ -182,10 +180,16 @@ app.get("/scrape", async (req, res) => {
 
     res.json({ count: finalResults.length, results: finalResults });
   } catch (err) {
-    console.error("❌ Error during scraping:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Error during scraping:", err.message);
+    res.status(500).json({ error: `Scraping failed: ${err.message}` });
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (err) {
+        console.error("⚠️ Error closing browser:", err.message);
+      }
+    }
   }
 });
 
