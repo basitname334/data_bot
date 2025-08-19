@@ -84,7 +84,8 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
+    // Attempt to launch Puppeteer with specified executablePath, fall back to default if not found
+    const launchOptions = {
       headless: "new",
       args: [
         "--no-sandbox",
@@ -93,9 +94,15 @@ app.get("/scrape", async (req, res) => {
         "--disable-web-security",
         "--ignore-certificate-errors",
       ],
-      // Specify executable path for Render (set in Dockerfile)
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
-    });
+    };
+
+    // Only set executablePath if environment variable is defined and exists
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+
+    console.log("Launching Puppeteer with options:", launchOptions);
+    browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"

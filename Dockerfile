@@ -50,6 +50,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Debug: Verify Chromium installation
+RUN which chromium-browser || echo "Chromium binary not found" && ls -l /usr/bin/chromium-browser || true
+
 # Set environment variables for Puppeteer
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer
