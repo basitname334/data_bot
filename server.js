@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const puppeteer = require("puppeteer");
 const fs = require("fs");
@@ -21,7 +20,8 @@ async function extractEmailFromWebsite(browser, url) {
       email: emailMatch ? emailMatch[0] : "N/A",
       phone: phoneMatch ? phoneMatch[0] : "N/A",
     };
-  } catch {
+  } catch (err) {
+    console.error(`Error extracting from ${url}:`, err.message);
     return { email: "N/A", phone: "N/A" };
   }
 }
@@ -44,8 +44,8 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
       await page.close();
       return { website, email: extracted.email, phone: extracted.phone };
     }
-  } catch {
-    console.log("⚠️ Google fallback failed:", businessName);
+  } catch (err) {
+    console.error(`Google fallback failed for ${businessName}:`, err.message);
   }
 
   await page.close();
@@ -68,15 +68,14 @@ app.get("/scrape", async (req, res) => {
     browser = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     });
     const page = await browser.newPage();
 
-    // ==========================
-    // 🔹 Google Maps
-    // ==========================
+    // Google Maps
     const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}/`;
     console.log(`📍 Scraping Google Maps: ${mapsUrl}`);
-    await page.goto(mapsUrl, { waitUntil: "networkidle2" });
+    await page.goto(mapsUrl, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
 
     const mapsResults = await page.evaluate((scrapedAt, city) => {
@@ -101,9 +100,7 @@ app.get("/scrape", async (req, res) => {
       });
     }, scrapedAt, city);
 
-    // ==========================
-    // 🔹 YellowPages
-    // ==========================
+    // YellowPages
     const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchQuery)}`;
     console.log(`📞 Scraping YellowPages: ${ypUrl}`);
     await page.goto(ypUrl, { waitUntil: "networkidle2" });
@@ -141,13 +138,11 @@ app.get("/scrape", async (req, res) => {
           if (extracted.phone !== "N/A") biz.Phone = extracted.phone;
         }
       }
-    } catch {
-      console.log("⚠️ No YellowPages results found or structure changed.");
+    } catch (err) {
+      console.error("⚠️ No YellowPages results found or structure changed:", err.message);
     }
 
-    // ==========================
-    // 🔹 Merge + Deduplicate
-    // ==========================
+    // Merge + Deduplicate
     const combined = [...mapsResults, ...ypResults];
     const finalResults = [];
     const seen = new Set();
@@ -159,9 +154,7 @@ app.get("/scrape", async (req, res) => {
       }
     }
 
-    // ==========================
-    // 🔹 Fallback Search
-    // ==========================
+    // Fallback Search
     for (let biz of finalResults) {
       if (biz.Email === "N/A" || biz.Phone === "N/A" || biz.URL === "N/A") {
         const fallback = await searchGoogleForWebsite(browser, biz["Title / Business"], biz.City, country);
@@ -174,7 +167,7 @@ app.get("/scrape", async (req, res) => {
     res.json({ count: finalResults.length, results: finalResults });
   } catch (err) {
     console.error("❌ Error during scraping:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: `Scraping failed: ${err.message}` });
   } finally {
     if (browser) await browser.close();
   }

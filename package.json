@@ -12,8 +12,12 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "browsers": "^1.0.2",
+    "chrome": "^0.1.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "install": "^0.13.0",
+    "npx": "^10.2.2",
     "puppeteer": "^24.16.2"
   },
   "devDependencies": {
