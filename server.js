@@ -1,11 +1,9 @@
-
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
-const fs = require('fs');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000; // Use Render's PORT env variable
 const MAX_RESULTS_PER_SOURCE = 5;
 
 // Middleware
@@ -50,7 +48,6 @@ app.get('/', (req, res) => {
           const cuisine = document.getElementById('cuisine').value;
           const city = document.getElementById('city').value;
           const query = \`\${cuisine} in \${city}\`;
-饿;
           const resultsDiv = document.getElementById('results');
           const errorDiv = document.getElementById('error');
           const loadingDiv = document.getElementById('loading');
@@ -109,23 +106,21 @@ app.get('/scrape', async (req, res) => {
   console.log(`Starting scrape for query: ${query}`);
 
   try {
-    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
-                      '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome';
-    console.log(`Attempting to launch Puppeteer with executablePath: ${chromePath}`);
-    
-    if (!fs.existsSync(chromePath)) {
-      console.log('Falling back to bundled Chromium');
-    }
-
+    console.log('Launching Puppeteer with bundled Chrome...');
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-      executablePath: fs.existsSync(chromePath) ? chromePath : undefined
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-web-security',
+        '--single-process', // Reduce memory usage
+      ],
     });
 
     const data = [];
     
-    // Parallel scraping with Promise.all for efficiency
     console.log('Scraping Google Maps and Yellow Pages in parallel...');
     const [googleMapsResults, yellowPagesResults] = await Promise.all([
       scrapeGoogleMaps(browser, query).catch(err => {
@@ -141,18 +136,17 @@ app.get('/scrape', async (req, res) => {
     data.push(...googleMapsResults, ...yellowPagesResults);
 
     console.log('Enhancing data from websites...');
-    // Limit concurrent website scraping to avoid resource issues
     const MAX_CONCURRENT_WEBSITES = 2;
     const websitePromises = [];
     for (let item of data) {
       websitePromises.push(enhanceWithWebsite(browser, item));
       if (websitePromises.length >= MAX_CONCURRENT_WEBSITES) {
         await Promise.all(websitePromises);
-        websitePromises.length = 0; // Clear the array
+        websitePromises.length = 0;
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    await Promise.all(websitePromises); // Process remaining websites
+    await Promise.all(websitePromises);
 
     const uniqueData = [...new Map(data.map(item => [item.title.toLowerCase(), item])).values()];
     console.log(`After dedup, ${uniqueData.length} results`);
@@ -264,7 +258,10 @@ async function scrapeYellowPages(browser, query) {
       'Accept-Language': 'en-US,en;q=0.9',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
     });
-    await page.goto(`https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchTerm)}/${encodeURIComponent(location)}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.goto(`https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchTerm)}/${encodeURIComponent(location)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000
+    });
     const results = await page.evaluate((max) => {
       const items = [];
       const businesses = document.querySelectorAll('.listing__content__wrap');
