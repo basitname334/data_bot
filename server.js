@@ -84,7 +84,6 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    // Attempt to launch Puppeteer with specified executablePath, fall back to default if not found
     const launchOptions = {
       headless: "new",
       args: [
@@ -96,9 +95,12 @@ app.get("/scrape", async (req, res) => {
       ],
     };
 
-    // Only set executablePath if environment variable is defined and exists
+    // Use executablePath only if defined and fallback to default Chromium
     if (process.env.PUPPETEER_EXECUTABLE_PATH) {
       launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      console.log(`Using executablePath: ${launchOptions.executablePath}`);
+    } else {
+      console.log("No executablePath provided, using Puppeteer's default Chromium");
     }
 
     console.log("Launching Puppeteer with options:", launchOptions);

@@ -16,14 +16,12 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
-    libc6 \
     libcairo2 \
     libcups2 \
     libdbus-1-3 \
     libexpat1 \
     libfontconfig1 \
     libgbm1 \
-    libgcc1 \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
@@ -50,11 +48,13 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Debug: Verify Chromium installation
-RUN which chromium-browser || echo "Chromium binary not found" && ls -l /usr/bin/chromium-browser || true
+# Debug: Verify Chromium installation and path
+RUN echo "Checking for chromium-browser..." && \
+    which chromium-browser || echo "Chromium binary not found at /usr/bin/chromium-browser" && \
+    find / -name chromium-browser 2>/dev/null || echo "No chromium-browser found anywhere" && \
+    ls -l /usr/bin/chromium-browser || echo "No file at /usr/bin/chromium-browser"
 
 # Set environment variables for Puppeteer
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer
 
 # Copy the rest of the application
