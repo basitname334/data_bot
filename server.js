@@ -4,23 +4,33 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 
 const app = express();
-// Ensure the port is set to Render's PORT environment variable or defaults to 3000 for local development
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse JSON (optional, if you need to handle JSON payloads)
 app.use(express.json());
 
-// Extract email & phone from website
+// Set Puppeteer cache directory for Render
+process.env.PUPPETEER_CACHE_DIR = "/opt/render/.cache/puppeteer";
+
 async function extractEmailFromWebsite(browser, url) {
+  let page;
   try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    );
+
+    let finalUrl = url;
+    if (url.includes("yellowpages.ca/gourl")) {
+      const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      finalUrl = response.url();
+    } else {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    }
 
     const content = await page.content();
     const emailMatch = content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/);
     const phoneMatch = content.match(/(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}/);
 
-    await page.close();
     return {
       email: emailMatch ? emailMatch[0] : "N/A",
       phone: phoneMatch ? phoneMatch[0] : "N/A",
@@ -28,36 +38,40 @@ async function extractEmailFromWebsite(browser, url) {
   } catch (error) {
     console.error(`⚠️ Error extracting from ${url}:`, error.message);
     return { email: "N/A", phone: "N/A" };
+  } finally {
+    if (page) await page.close();
   }
 }
 
-// Fallback Google search
 async function searchGoogleForWebsite(browser, businessName, city, country = "Canada") {
-  const page = await browser.newPage();
-  const query = encodeURIComponent(`${businessName} ${city} ${country}`);
-  const googleUrl = `https://www.google.com/search?q=${query}`;
-  await page.goto(googleUrl, { waitUntil: "networkidle2" });
-
+  let page;
   try {
+    page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    );
+
+    const query = encodeURIComponent(`${businessName} ${city} ${country}`);
+    const googleUrl = `https://www.google.com/search?q=${query}`;
+    await page.goto(googleUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
     const website = await page.evaluate(() => {
-      const link = document.querySelector("a[href^='http']");
+      const link = document.querySelector("a[href^='http']:not([href*='google.'])");
       return link ? link.href : null;
     });
 
     if (website) {
       const extracted = await extractEmailFromWebsite(browser, website);
-      await page.close();
       return { website, email: extracted.email, phone: extracted.phone };
     }
   } catch (error) {
     console.error(`⚠️ Google fallback failed for ${businessName}:`, error.message);
+  } finally {
+    if (page) await page.close();
   }
-
-  await page.close();
   return { website: "N/A", email: "N/A", phone: "N/A" };
 }
 
-// MAIN ROUTE
 app.get("/scrape", async (req, res) => {
   const searchQuery = req.query.query;
   if (!searchQuery) {
@@ -70,23 +84,27 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    // Launch Puppeteer with Render-compatible settings
     browser = await puppeteer.launch({
-      headless: "new", // Use new headless mode for better compatibility
+      headless: "new",
       args: [
-        "--no-sandbox", // Required for Render's environment
+        "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", // Helps with memory issues in containerized environments
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--ignore-certificate-errors",
       ],
+      // Specify executable path for Render (set in Dockerfile)
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
     });
     const page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    );
 
-    // ==========================
-    // 🔹 Google Maps
-    // ==========================
+    // Google Maps
     const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}/`;
     console.log(`📍 Scraping Google Maps: ${mapsUrl}`);
-    await page.goto(mapsUrl, { waitUntil: "networkidle2" });
+    await page.goto(mapsUrl, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
 
     const mapsResults = await page.evaluate((scrapedAt, city) => {
@@ -111,12 +129,10 @@ app.get("/scrape", async (req, res) => {
       });
     }, scrapedAt, city);
 
-    // ==========================
-    // 🔹 YellowPages
-    // ==========================
+    // YellowPages
     const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchQuery)}`;
     console.log(`📞 Scraping YellowPages: ${ypUrl}`);
-    await page.goto(ypUrl, { waitUntil: "networkidle2" });
+    await page.goto(ypUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
     let ypResults = [];
     try {
@@ -143,7 +159,6 @@ app.get("/scrape", async (req, res) => {
         });
       }, scrapedAt, city);
 
-      // Visit each site for email/phone
       for (let biz of ypResults) {
         if (biz.URL && biz.URL.startsWith("http")) {
           const extracted = await extractEmailFromWebsite(browser, biz.URL);
@@ -155,9 +170,7 @@ app.get("/scrape", async (req, res) => {
       console.error("⚠️ No YellowPages results found or structure changed:", error.message);
     }
 
-    // ==========================
-    // 🔹 Merge + Deduplicate
-    // ==========================
+    // Merge + Deduplicate
     const combined = [...mapsResults, ...ypResults];
     const finalResults = [];
     const seen = new Set();
@@ -169,9 +182,7 @@ app.get("/scrape", async (req, res) => {
       }
     }
 
-    // ==========================
-    // 🔹 Fallback Search
-    // ==========================
+    // Fallback Search
     for (let biz of finalResults) {
       if (biz.Email === "N/A" || biz.Phone === "N/A" || biz.URL === "N/A") {
         const fallback = await searchGoogleForWebsite(browser, biz["Title / Business"], biz.City, country);
@@ -190,10 +201,8 @@ app.get("/scrape", async (req, res) => {
   }
 });
 
-// Health check endpoint (Render recommends this for monitoring)
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-// Start the server
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
