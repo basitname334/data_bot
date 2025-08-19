@@ -121,10 +121,11 @@ app.get('/scrape', async (req, res) => {
   query = query.replace(/restrurant/i, 'restaurant');
 
   try {
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox','--disable-setuid-sandbox','--disable-gpu','--disable-dev-shm-usage','--disable-web-security']
-    });
+const browser = await puppeteer.launch({
+  headless: true,
+  args: ['--no-sandbox','--disable-setuid-sandbox','--disable-gpu','--disable-dev-shm-usage','--disable-web-security']
+});
+
 
     const data = [];
 
