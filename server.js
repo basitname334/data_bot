@@ -4,7 +4,7 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 
 const app = express();
-const PORT = https://data-bot-3hrl.onrender.com/ || 3000;
+const PORT = process.env.PORT || 3000;
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -67,8 +67,17 @@ app.get("/scrape", async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process",
+      ],
+      executablePath: puppeteer.executablePath(), // ✅ FIX: auto-detect Chromium
     });
+
     const page = await browser.newPage();
 
     // ==========================
