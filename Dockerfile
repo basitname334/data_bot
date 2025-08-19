@@ -1,21 +1,34 @@
-```
-# Use Node.js 24 as the base image
-FROM node:24
+# Use Node.js 24 slim for smaller image size
+FROM node:24-slim
 
-# Install Chromium and Puppeteer dependencies
+# Install Chromium and additional Puppeteer dependencies
 RUN apt-get update && apt-get install -y \
   chromium \
+  ca-certificates \
   fonts-liberation \
+  libasound2 \
   libatk-bridge2.0-0 \
   libatk1.0-0 \
+  libatspi2.0-0 \
   libcairo2 \
   libcups2 \
+  libdbus-1-3 \
+  libdrm2 \
   libgbm1 \
   libgtk-3-0 \
+  libnspr4 \
+  libnss3 \
   libpango-1.0-0 \
+  libx11-6 \
+  libxcb1 \
   libxcomposite1 \
   libxdamage1 \
+  libxext6 \
+  libxfixes3 \
   libxrandr2 \
+  libxrender1 \
+  wget \
+  xdg-utils \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
@@ -26,18 +39,14 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm install
+RUN npm install --production
 
 # Copy the rest of the application code
 COPY . .
 
-# Set environment variable for Puppeteer to use installed Chromium
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# Set environment variables for Puppeteer
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-
-# Expose the port (optional, for documentation; Render assigns PORT dynamically)
-EXPOSE 10000
 
 # Start the application
 CMD ["npm", "run", "start:render"]
-```

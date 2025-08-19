@@ -1,12 +1,14 @@
+// server.js
 const express = require("express");
 const puppeteer = require("puppeteer");
-const cors = require("cors");
+const fs = require("fs");
 
 const app = express();
-const PORT = process.env.PORT; // Render provides PORT, no fallback needed
-const HOST = "0.0.0.0"; // Bind to all interfaces for Render
+// Ensure the port is set to Render's PORT environment variable or defaults to 3000 for local development
+const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// Middleware to parse JSON (optional, if you need to handle JSON payloads)
+app.use(express.json());
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -23,8 +25,8 @@ async function extractEmailFromWebsite(browser, url) {
       email: emailMatch ? emailMatch[0] : "N/A",
       phone: phoneMatch ? phoneMatch[0] : "N/A",
     };
-  } catch (err) {
-    console.error(`⚠️ Error extracting from ${url}:`, err.message);
+  } catch (error) {
+    console.error(`⚠️ Error extracting from ${url}:`, error.message);
     return { email: "N/A", phone: "N/A" };
   }
 }
@@ -34,10 +36,9 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
   const page = await browser.newPage();
   const query = encodeURIComponent(`${businessName} ${city} ${country}`);
   const googleUrl = `https://www.google.com/search?q=${query}`;
+  await page.goto(googleUrl, { waitUntil: "networkidle2" });
 
   try {
-    await page.goto(googleUrl, { waitUntil: "networkidle2", timeout: 30000 });
-
     const website = await page.evaluate(() => {
       const link = document.querySelector("a[href^='http']");
       return link ? link.href : null;
@@ -48,8 +49,8 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
       await page.close();
       return { website, email: extracted.email, phone: extracted.phone };
     }
-  } catch (err) {
-    console.error(`⚠️ Google fallback failed for ${businessName}:`, err.message);
+  } catch (error) {
+    console.error(`⚠️ Google fallback failed for ${businessName}:`, error.message);
   }
 
   await page.close();
@@ -69,21 +70,15 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    // Launch browser with Render-compatible options
-    const browserOptions = {
-      headless: true,
+    // Launch Puppeteer with Render-compatible settings
+    browser = await puppeteer.launch({
+      headless: "new", // Use new headless mode for better compatibility
       args: [
-        "--no-sandbox",
+        "--no-sandbox", // Required for Render's environment
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", // Helps with memory issues in containers
-        "--disable-gpu", // Often needed in containerized environments
-        "--single-process", // Reduces memory usage
+        "--disable-dev-shm-usage", // Helps with memory issues in containerized environments
       ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use bundled Chromium if not set
-    };
-
-    console.log("Launching browser with options:", browserOptions);
-    browser = await puppeteer.launch(browserOptions);
+    });
     const page = await browser.newPage();
 
     // ==========================
@@ -91,7 +86,7 @@ app.get("/scrape", async (req, res) => {
     // ==========================
     const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}/`;
     console.log(`📍 Scraping Google Maps: ${mapsUrl}`);
-    await page.goto(mapsUrl, { waitUntil: "networkidle2", timeout: 60000 });
+    await page.goto(mapsUrl, { waitUntil: "networkidle2" });
     await page.waitForSelector(".Nv2PK", { timeout: 60000 });
 
     const mapsResults = await page.evaluate((scrapedAt, city) => {
@@ -121,7 +116,7 @@ app.get("/scrape", async (req, res) => {
     // ==========================
     const ypUrl = `https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchQuery)}`;
     console.log(`📞 Scraping YellowPages: ${ypUrl}`);
-    await page.goto(ypUrl, { waitUntil: "networkidle2", timeout: 30000 });
+    await page.goto(ypUrl, { waitUntil: "networkidle2" });
 
     let ypResults = [];
     try {
@@ -156,8 +151,8 @@ app.get("/scrape", async (req, res) => {
           if (extracted.phone !== "N/A") biz.Phone = extracted.phone;
         }
       }
-    } catch (err) {
-      console.error("⚠️ No YellowPages results found or structure changed:", err.message);
+    } catch (error) {
+      console.error("⚠️ No YellowPages results found or structure changed:", error.message);
     }
 
     // ==========================
@@ -189,23 +184,16 @@ app.get("/scrape", async (req, res) => {
     res.json({ count: finalResults.length, results: finalResults });
   } catch (err) {
     console.error("❌ Error during scraping:", err.message);
-    res.status(500).json({ error: `Scraping failed: ${err.message}` });
+    res.status(500).json({ error: "Internal server error during scraping" });
   } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (err) {
-        console.error("⚠️ Error closing browser:", err.message);
-      }
-    }
+    if (browser) await browser.close();
   }
 });
 
-// Start server with error handling
-app.listen(PORT, HOST, () => {
-  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
-}).on("error", (err) => {
-  console.error(`❌ Server failed to start: ${err.message}`);
-  console.error("Check that PORT and HOST are correctly set. Current values:", { PORT, HOST });
-  process.exit(1);
+// Health check endpoint (Render recommends this for monitoring)
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "OK" });
 });
+
+// Start the server
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
