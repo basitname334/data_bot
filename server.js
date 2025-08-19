@@ -4,7 +4,7 @@ const puppeteer = require("puppeteer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE_URL = "https://data-bot-3hrl.onrender.com";
+const BASE_URL = process.env.BASE_URL || "https://data-bot-3hrl.onrender.com";
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -77,8 +77,17 @@ app.get("/scrape", async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process"
+      ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/google-chrome"
     });
+
     const page = await browser.newPage();
 
     // ==========================
