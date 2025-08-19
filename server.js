@@ -4,6 +4,8 @@ const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = "0.0.0.0"; // Required for Render
+
 app.use(cors());
 
 // Extract email & phone from website
@@ -67,10 +69,16 @@ app.get("/scrape", async (req, res) => {
 
   let browser;
   try {
-    // Launch browser with optional executable path
+    // Launch browser with Render-compatible options
     const browserOptions = {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage", // Helps with memory issues in containers
+        "--disable-gpu", // Often needed in containerized environments
+        "--single-process", // Reduces memory usage
+      ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use bundled Chromium if not set
     };
 
@@ -193,4 +201,10 @@ app.get("/scrape", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Start server with error handling
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+}).on("error", (err) => {
+  console.error("❌ Server failed to start:", err.message);
+  process.exit(1);
+});
