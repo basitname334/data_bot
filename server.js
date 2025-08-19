@@ -4,10 +4,14 @@ const cors = require('cors');
 
 const app = express();
 const port = 3000;
-const MAX_RESULTS_PER_SOURCE = 10; // Increased to 10 for more results
+const MAX_RESULTS_PER_SOURCE = 5; // Reduced to 5 to lower resource usage
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: ['https://data-bot-3hrl.onrender.com', 'http://localhost:3000'],
+  methods: ['GET', 'POST'],
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Serve static HTML page
@@ -54,10 +58,12 @@ app.get('/', (req, res) => {
           try {
             const response = await fetch('/scrape?query=' + encodeURIComponent(query), {
               method: 'GET',
-              headers: { 'Content-Type': 'application/json' }
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 60000 // Increased timeout
             });
             if (!response.ok) {
-              throw new Error('Network response was not ok: ' + response.statusText);
+              const errorText = await response.text();
+              throw new Error('Network response was not ok: ' + response.status + ' - ' + errorText);
             }
             const data = await response.json();
             if (data.error) {
@@ -88,18 +94,19 @@ app.get('/scrape', async (req, res) => {
   console.log(`Starting scrape for query: ${query}`);
 
   try {
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+    });
     const data = [];
 
-    // Scrape Google Search
+    // Scrape sequentially to reduce resource usage
     console.log('Scraping Google Search...');
     data.push(...await scrapeGoogleSearch(browser, query));
 
-    // Scrape Google Maps
     console.log('Scraping Google Maps...');
     data.push(...await scrapeGoogleMaps(browser, query));
 
-    // Scrape Yellow Pages
     console.log('Scraping Yellow Pages...');
     data.push(...await scrapeYellowPages(browser, query));
 
@@ -107,6 +114,7 @@ app.get('/scrape', async (req, res) => {
     console.log('Enhancing data from websites...');
     for (let item of data) {
       await enhanceWithWebsite(browser, item);
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Delay to avoid rate limiting
     }
 
     // Deduplicate by title (case-insensitive)
@@ -128,7 +136,11 @@ app.get('/scrape', async (req, res) => {
 async function scrapeGoogleSearch(browser, query) {
   const page = await browser.newPage();
   try {
-    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    });
+    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2', timeout: 45000 });
     const results = await page.evaluate((max) => {
       const items = [];
       const businesses = document.querySelectorAll('.Nv2PK');
@@ -169,23 +181,25 @@ async function scrapeGoogleMaps(browser, query) {
   const MAX_RETRIES = 3;
 
   try {
-    // Navigate with a realistic user-agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    });
     await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
       waitUntil: 'networkidle2',
-      timeout: 30000,
+      timeout: 45000,
     });
 
-    // Retry logic for waiting for business results
     let businessLinks = [];
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(`Attempt ${attempt} to find business links...`);
-        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 15000 });
+        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 20000 });
         businessLinks = await page.$$('a[href*="google.com/maps/place"]');
         if (businessLinks.length > 0) break;
         console.log(`No business links found, retrying (${attempt}/${MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
         console.error(`Attempt ${attempt} failed:`, e.message);
         if (attempt === MAX_RETRIES) {
@@ -195,21 +209,18 @@ async function scrapeGoogleMaps(browser, query) {
       }
     }
 
-    // Scroll to load more results - increased iterations for more results
     await page.evaluate(async () => {
       const scrollable = document.querySelector('.m6QErb.DxyBCb');
       if (scrollable) {
-        for (let i = 0; i < 10; i++) { // Increased to 10 scrolls
-          scrollable.scrollBy(0, 2000); // Increased scroll distance
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay
+        for (let i = 0; i < 5; i++) {
+          scrollable.scrollBy(0, 2000);
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
     });
 
-    // Re-fetch business links after scrolling to get more
     businessLinks = await page.$$('a[href*="google.com/maps/place"]');
 
-    // Click into business details for data (removed direct extraction to avoid wrong URLs)
     for (let i = 0; i < Math.min(businessLinks.length, MAX_RESULTS_PER_SOURCE); i++) {
       try {
         const freshLinks = await page.$$('a[href*="google.com/maps/place"]');
@@ -218,10 +229,10 @@ async function scrapeGoogleMaps(browser, query) {
         await page.evaluate((el) => {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, freshLinks[i]);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Increased delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
         await freshLinks[i].click();
-        await page.waitForSelector('h1.DUwDvf', { timeout: 15000 }); // Increased timeout
+        await page.waitForSelector('h1.DUwDvf', { timeout: 20000 });
 
         const details = await page.evaluate(() => {
           const name = document.querySelector('h1.DUwDvf')?.textContent.trim() || '';
@@ -250,9 +261,9 @@ async function scrapeGoogleMaps(browser, query) {
           });
         }
 
-        await page.goBack({ waitUntil: 'networkidle2', timeout: 15000 }); // Increased timeout
-        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 15000 }); // Increased timeout
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay for reload
+        await page.goBack({ waitUntil: 'networkidle2', timeout: 20000 });
+        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 20000 });
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
         console.error(`Error scraping Maps detail ${i + 1}:`, e.message);
         continue;
@@ -274,7 +285,11 @@ async function scrapeYellowPages(browser, query) {
   const location = 'Toronto';
   const page = await browser.newPage();
   try {
-    await page.goto(`https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchTerm)}/${encodeURIComponent(location)}`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    });
+    await page.goto(`https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchTerm)}/${encodeURIComponent(location)}`, { waitUntil: 'networkidle2', timeout: 45000 });
     const results = await page.evaluate((max) => {
       const items = [];
       const businesses = document.querySelectorAll('.listing__content__wrap');
@@ -310,7 +325,6 @@ async function scrapeYellowPages(browser, query) {
 }
 
 async function enhanceWithWebsite(browser, item) {
-  // Skip if item already has either phone or email
   if (!item.url || item.email || item.phone) {
     console.log(`Skipping website scrape for ${item.title}: already has contact info (email: ${item.email}, phone: ${item.phone})`);
     return;
@@ -322,18 +336,16 @@ async function enhanceWithWebsite(browser, item) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       console.log(`Attempt ${attempt} to scrape website for ${item.title}: ${item.url}`);
-      await page.goto(item.url, { waitUntil: 'networkidle2', timeout: 15000 });
+      await page.goto(item.url, { waitUntil: 'networkidle2', timeout: 20000 });
       const content = await page.evaluate(() => document.body.innerText);
 
-      // Extract email and phone
       const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
       const emails = content.match(emailRegex) || [];
-      const phoneRegex = /\b((\+?1)?[\s.-]?)?(\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g; // Improved regex for more formats
+      const phoneRegex = /\b((\+?1)?[\s.-]?)?(\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
       const phones = content.match(phoneRegex) || [];
 
       console.log(`Scraped for ${item.title}: emails=${emails.join(', ')}, phones=${phones.join(', ')}`);
 
-      // Assign email or phone (prefer email, but ensure at least one)
       if (emails.length > 0) {
         item.email = emails[0];
         console.log(`Assigned email for ${item.title}: ${item.email}`);
@@ -344,7 +356,6 @@ async function enhanceWithWebsite(browser, item) {
         break;
       }
 
-      // Extract address (unchanged)
       const addressRegex = /\d{1,5}\s+\w+\s+\w+(\s+\w+)*,?\s*Toronto,\s*ON\s*[A-Z0-9]{3}\s*[A-Z0-9]{3}/gi;
       const addresses = content.match(addressRegex) || [];
       item.address = item.address || addresses[0] || '';
@@ -358,7 +369,7 @@ async function enhanceWithWebsite(browser, item) {
       if (attempt === MAX_RETRIES) {
         console.warn(`Failed to scrape contact info for ${item.title} after ${MAX_RETRIES} attempts`);
       }
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Delay before retry
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
 
