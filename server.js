@@ -1,6 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
+const fs = require('fs');
 
 const app = express();
 const port = 3000;
@@ -94,9 +95,22 @@ app.get('/scrape', async (req, res) => {
   console.log(`Starting scrape for query: ${query}`);
 
   try {
+    // Debug: Log the executable path being used
+    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
+                      '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome';
+    console.log(`Attempting to launch Puppeteer with executablePath: ${chromePath}`);
+    
+    // Check if the Chrome binary exists
+    if (!fs.existsSync(chromePath)) {
+      console.error(`Chrome binary not found at ${chromePath}`);
+      // Fallback to bundled Chromium
+      console.log('Falling back to bundled Chromium');
+    }
+
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+      executablePath: fs.existsSync(chromePath) ? chromePath : undefined
     });
     const data = [];
 
