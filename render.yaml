@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: my-scraper-api
+    env: node
+    plan: free
+    buildCommand: npm install && npm run postinstall
+    startCommand: npm run start:render
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/.cache/ms-playwright

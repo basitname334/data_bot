@@ -1,38 +1,33 @@
 {
   "name": "my-scraper-api",
   "version": "1.0.0",
-  "description": "Puppeteer scraper API with Express",
+  "description": "Playwright scraper API with Express",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
     "start:prod": "node server.js",
     "start:render": "node server.js",
+    "postinstall": "npx playwright install --with-deps",
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "browsers": "^1.0.2",
-    "chrome": "^0.1.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "install": "^0.13.0",
-    "npx": "^10.2.2",
-    "playwright": "^1.54.2",
-    "puppeteer": "^24.16.2",
-    "puppeteer-extra": "^3.3.6"
+    "playwright": "^1.47.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
   },
   "keywords": [
     "scraper",
-    "puppeteer",
+    "playwright",
     "express",
     "api"
   ],
   "engines": {
-    "node": ">=18.x <=24.x"
+    "node": ">=18.x <=20.x"
   },
   "author": "",
   "license": "ISC"
