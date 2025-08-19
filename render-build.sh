@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+# Exit on error
+set -o errexit
 
-# Ensure Puppeteer cache dir exists
-export PUPPETEER_CACHE_DIR=${PUPPETEER_CACHE_DIR:-/opt/render/.cache/puppeteer}
-mkdir -p "$PUPPETEER_CACHE_DIR"
-
-# Install dependencies
+# Install deps
 npm install
 
-# Download Chromium for Puppeteer
-npx puppeteer browsers install chromium
+# Ensure Chromium/Chrome is installed for Puppeteer
+npx puppeteer browsers install chrome
