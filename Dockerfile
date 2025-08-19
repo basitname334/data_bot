@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     lsb-release \
     xdg-utils \
+    wget \
     && apt-get clean
 
 # Copy package.json and install dependencies
@@ -35,11 +36,23 @@ RUN npm install
 # Create cache directory with appropriate permissions
 RUN mkdir -p /opt/render/.cache/puppeteer && chmod -R 777 /opt/render/.cache/puppeteer
 
-# Install Chrome for Puppeteer explicitly and verify
-RUN npx puppeteer browsers install chrome || echo "Chrome installation failed, checking logs..."
+# Check available disk space before installing Chrome
+RUN df -h > /disk_space_before.txt
+
+# Install Chrome for Puppeteer with retries and debugging
+RUN npm install -g npm@latest && \
+    npx puppeteer browsers install chrome --retry 3 || (echo "Chrome installation failed" && exit 1)
 
 # Debug: List contents of cache directory to verify Chrome installation
-RUN ls -la /opt/render/.cache/puppeteer/chrome || echo "No Chrome binary found in cache"
+RUN ls -la /opt/render/.cache/puppeteer/chrome > /chrome_cache_contents.txt || echo "No Chrome binary found in cache"
+
+# Verify Chrome binary exists and is executable
+RUN test -f /opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome && \
+    chmod +x /opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome || \
+    echo "Chrome binary not found or not executable"
+
+# Check disk space after installation
+RUN df -h > /disk_space_after.txt
 
 # Copy the rest of the application code
 COPY . .
