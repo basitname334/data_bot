@@ -1,0 +1,12 @@
+services:
+     - type: web
+       name: my-scraper-api
+       env: node
+       plan: free
+       buildCommand: npm install
+       startCommand: npm run start:render
+       envVars:
+         - key: NODE_VERSION
+           value: 24
+         - key: PUPPETEER_EXECUTABLE_PATH
+           value: /usr/bin/chromium-browser
