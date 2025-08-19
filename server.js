@@ -1,10 +1,10 @@
 // server.js
 const express = require("express");
 const puppeteer = require("puppeteer");
-const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE_URL = "https://data-bot-3hrl.onrender.com";
 
 // Extract email & phone from website
 async function extractEmailFromWebsite(browser, url) {
@@ -52,7 +52,17 @@ async function searchGoogleForWebsite(browser, businessName, city, country = "Ca
   return { website: "N/A", email: "N/A", phone: "N/A" };
 }
 
-// MAIN ROUTE
+// Root route (API guide)
+app.get("/", (req, res) => {
+  res.send(`
+    <h2>🚀 Puppeteer Scraper API</h2>
+    <p>Use the endpoint below to scrape business data:</p>
+    <pre><code>${BASE_URL}/scrape?query=restaurants in Vernon</code></pre>
+    <p>Replace <b>restaurants in Vernon</b> with your own search.</p>
+  `);
+});
+
+// Scraper route
 app.get("/scrape", async (req, res) => {
   const searchQuery = req.query.query;
   if (!searchQuery) {
@@ -133,7 +143,6 @@ app.get("/scrape", async (req, res) => {
         });
       }, scrapedAt, city);
 
-      // Visit each site for email/phone
       for (let biz of ypResults) {
         if (biz.URL && biz.URL.startsWith("http")) {
           const extracted = await extractEmailFromWebsite(browser, biz.URL);
@@ -180,4 +189,7 @@ app.get("/scrape", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running at ${BASE_URL}`);
+  console.log(`Try it now: ${BASE_URL}/scrape?query=restaurants in Vernon`);
+});
