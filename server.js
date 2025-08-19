@@ -1,10 +1,13 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cors = require('cors');
 
+puppeteer.use(StealthPlugin());
+
 const app = express();
-const port = 3000;
-const MAX_RESULTS_PER_SOURCE = 10; // Increased to 10 for more results
+const port = process.env.PORT || 3000; // Use Render's PORT env variable
+const MAX_RESULTS_PER_SOURCE = 10; // Target ~10 results per source
 
 // Middleware
 app.use(cors());
@@ -88,7 +91,11 @@ app.get('/scrape', async (req, res) => {
   console.log(`Starting scrape for query: ${query}`);
 
   try {
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH // For Render compatibility
+    });
     const data = [];
 
     // Scrape Google Search
@@ -109,8 +116,8 @@ app.get('/scrape', async (req, res) => {
       await enhanceWithWebsite(browser, item);
     }
 
-    // Deduplicate by title (case-insensitive)
-    const uniqueData = [...new Map(data.map(item => [item.title.toLowerCase(), item])).values()];
+    // Deduplicate by title and source (to allow same title from different sources)
+    const uniqueData = [...new Map(data.map(item => [`${item.title.toLowerCase()}_${item.source}`, item])).values()];
 
     // Filter out items missing both phone and email
     const filteredData = uniqueData.filter(item => item.email || item.phone);
@@ -128,32 +135,45 @@ app.get('/scrape', async (req, res) => {
 async function scrapeGoogleSearch(browser, query) {
   const page = await browser.newPage();
   try {
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Scroll to load more results
+    await page.evaluate(async () => {
+      for (let i = 0; i < 5; i++) {
+        window.scrollBy(0, 2000);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    });
+
     const results = await page.evaluate((max) => {
       const items = [];
-      const businesses = document.querySelectorAll('.Nv2PK');
+      const businesses = document.querySelectorAll('.Nv2PK, .rllt__details');
       businesses.forEach((business, index) => {
         if (index >= max) return;
-        const name = business.querySelector('.qBF1Pd')?.textContent.trim() || '';
-        const phone = business.querySelector(".W4Efsd:last-child > .W4Efsd:nth-of-type(3) > span:last-child")?.textContent.replaceAll("·", "").trim() || '';
-        const website = business.querySelector("a.lcr4fd")?.getAttribute("href") || '';
+        const name = business.querySelector('.qBF1Pd, div[role="heading"]')?.textContent.trim() || '';
+        const phone = business.querySelector(".W4Efsd:last-child > .W4Efsd:nth-of-type(3) > span:last-child, span[data-local-attribute='p']")?.textContent.replaceAll("·", "").trim() || '';
+        const website = business.querySelector("a.lcr4fd, a[data-value='Website']")?.getAttribute("href") || '';
         const email = '';
-        const address = business.querySelector('.W4Efsd:last-child > .W4Efsd:nth-of-type(2) > span:last-child')?.textContent.trim() || '';
-        items.push({
-          industry: 'Restaurants',
-          city: 'Toronto',
-          title: name,
-          url: website,
-          rank: index + 1,
-          source: 'google',
-          scrapedAt: new Date().toISOString(),
-          email,
-          phone,
-          address
-        });
+        const address = business.querySelector('.W4Efsd:last-child > .W4Efsd:nth-of-type(2) > span:last-child, span[data-local-attribute="a"]')?.textContent.trim() || '';
+        if (name) {
+          items.push({
+            industry: 'Restaurants',
+            city: 'Toronto',
+            title: name,
+            url: website,
+            rank: index + 1,
+            source: 'google',
+            scrapedAt: new Date().toISOString(),
+            email,
+            phone,
+            address
+          });
+        }
       });
       return items;
     }, MAX_RESULTS_PER_SOURCE);
+    console.log(`Google Search found ${results.length} results`);
     return results;
   } catch (error) {
     console.error('Google Search scrape error:', error);
@@ -169,7 +189,6 @@ async function scrapeGoogleMaps(browser, query) {
   const MAX_RETRIES = 3;
 
   try {
-    // Navigate with a realistic user-agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, {
       waitUntil: 'networkidle2',
@@ -181,11 +200,11 @@ async function scrapeGoogleMaps(browser, query) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(`Attempt ${attempt} to find business links...`);
-        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 15000 });
+        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 20000 });
         businessLinks = await page.$$('a[href*="google.com/maps/place"]');
         if (businessLinks.length > 0) break;
         console.log(`No business links found, retrying (${attempt}/${MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
         console.error(`Attempt ${attempt} failed:`, e.message);
         if (attempt === MAX_RETRIES) {
@@ -195,21 +214,21 @@ async function scrapeGoogleMaps(browser, query) {
       }
     }
 
-    // Scroll to load more results - increased iterations for more results
+    // Scroll to load more results
     await page.evaluate(async () => {
       const scrollable = document.querySelector('.m6QErb.DxyBCb');
       if (scrollable) {
-        for (let i = 0; i < 10; i++) { // Increased to 10 scrolls
-          scrollable.scrollBy(0, 2000); // Increased scroll distance
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay
+        for (let i = 0; i < 15; i++) { // Increased to 15 scrolls
+          scrollable.scrollBy(0, 3000);
+          await new Promise(resolve => setTimeout(resolve, 2500));
         }
       }
     });
 
-    // Re-fetch business links after scrolling to get more
+    // Re-fetch business links after scrolling
     businessLinks = await page.$$('a[href*="google.com/maps/place"]');
 
-    // Click into business details for data (removed direct extraction to avoid wrong URLs)
+    // Click into business details for data
     for (let i = 0; i < Math.min(businessLinks.length, MAX_RESULTS_PER_SOURCE); i++) {
       try {
         const freshLinks = await page.$$('a[href*="google.com/maps/place"]');
@@ -218,10 +237,10 @@ async function scrapeGoogleMaps(browser, query) {
         await page.evaluate((el) => {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, freshLinks[i]);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Increased delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
         await freshLinks[i].click();
-        await page.waitForSelector('h1.DUwDvf', { timeout: 15000 }); // Increased timeout
+        await page.waitForSelector('h1.DUwDvf', { timeout: 20000 });
 
         const details = await page.evaluate(() => {
           const name = document.querySelector('h1.DUwDvf')?.textContent.trim() || '';
@@ -250,15 +269,16 @@ async function scrapeGoogleMaps(browser, query) {
           });
         }
 
-        await page.goBack({ waitUntil: 'networkidle2', timeout: 15000 }); // Increased timeout
-        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 15000 }); // Increased timeout
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay for reload
+        await page.goBack({ waitUntil: 'networkidle2', timeout: 20000 });
+        await page.waitForSelector('a[href*="google.com/maps/place"]', { timeout: 20000 });
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
         console.error(`Error scraping Maps detail ${i + 1}:`, e.message);
         continue;
       }
     }
 
+    console.log(`Google Maps found ${items.length} results`);
     return items;
   } catch (error) {
     console.error('Google Maps scrape error:', error.message);
@@ -274,7 +294,17 @@ async function scrapeYellowPages(browser, query) {
   const location = 'Toronto';
   const page = await browser.newPage();
   try {
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.goto(`https://www.yellowpages.ca/search/si/1/${encodeURIComponent(searchTerm)}/${encodeURIComponent(location)}`, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Scroll to load more results
+    await page.evaluate(async () => {
+      for (let i = 0; i < 5; i++) {
+        window.scrollBy(0, 2000);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    });
+
     const results = await page.evaluate((max) => {
       const items = [];
       const businesses = document.querySelectorAll('.listing__content__wrap');
@@ -285,21 +315,24 @@ async function scrapeYellowPages(browser, query) {
         const website = business.querySelector('.mlr__item--website a')?.href || '';
         const email = business.querySelector('.mlr__item--email a')?.href.replace('mailto:', '') || '';
         const address = business.querySelector('.listing__address')?.textContent.trim() || '';
-        items.push({
-          industry: 'Restaurants',
-          city: 'Toronto',
-          title: name,
-          url: website,
-          rank: index + 1,
-          source: 'yellowpages',
-          scrapedAt: new Date().toISOString(),
-          email,
-          phone,
-          address
-        });
+        if (name) {
+          items.push({
+            industry: 'Restaurants',
+            city: 'Toronto',
+            title: name,
+            url: website,
+            rank: index + 1,
+            source: 'yellowpages',
+            scrapedAt: new Date().toISOString(),
+            email,
+            phone,
+            address
+          });
+        }
       });
       return items;
     }, MAX_RESULTS_PER_SOURCE);
+    console.log(`Yellow Pages found ${results.length} results`);
     return results;
   } catch (error) {
     console.error('Yellow Pages scrape error:', error);
@@ -310,28 +343,32 @@ async function scrapeYellowPages(browser, query) {
 }
 
 async function enhanceWithWebsite(browser, item) {
-  // Skip if item already has either phone or email
   if (!item.url || item.email || item.phone) {
-    console.log(`Skipping website scrape for ${item.title}: already has contact info (email: ${item.email}, phone: ${item.phone})`);
+    console.log(`Skipping website scrape for ${item.title}: already has contact info (email: ${item.email || 'N/A'}, phone: ${item.phone || 'N/A'})`);
     return;
   }
 
   const page = await browser.newPage();
-  const MAX_RETRIES = 2;
+  const MAX_RETRIES = 3;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       console.log(`Attempt ${attempt} to scrape website for ${item.title}: ${item.url}`);
-      await page.goto(item.url, { waitUntil: 'networkidle2', timeout: 15000 });
-      const content = await page.evaluate(() => document.body.innerText);
+      await page.goto(item.url, { waitUntil: 'networkidle2', timeout: 20000 });
 
-      // Extract email and phone
+      // Extract from both text and HTML (for hidden elements)
+      const content = await page.evaluate(() => ({
+        text: document.body.innerText,
+        html: document.body.innerHTML
+      }));
+
+      // Improved regex for emails and phones
       const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
-      const emails = content.match(emailRegex) || [];
-      const phoneRegex = /\b((\+?1)?[\s.-]?)?(\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g; // Improved regex for more formats
-      const phones = content.match(phoneRegex) || [];
+      const emails = (content.text.match(emailRegex) || content.html.match(emailRegex) || []);
+      const phoneRegex = /\b((\+?1)?[\s.-]?)?(\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
+      const phones = (content.text.match(phoneRegex) || content.html.match(phoneRegex) || []);
 
-      console.log(`Scraped for ${item.title}: emails=${emails.join(', ')}, phones=${phones.join(', ')}`);
+      console.log(`Scraped for ${item.title}: emails=${emails.join(', ') || 'none'}, phones=${phones.join(', ') || 'none'}`);
 
       // Assign email or phone (prefer email, but ensure at least one)
       if (emails.length > 0) {
@@ -344,11 +381,11 @@ async function enhanceWithWebsite(browser, item) {
         break;
       }
 
-      // Extract address (unchanged)
+      // Extract address
       const addressRegex = /\d{1,5}\s+\w+\s+\w+(\s+\w+)*,?\s*Toronto,\s*ON\s*[A-Z0-9]{3}\s*[A-Z0-9]{3}/gi;
-      const addresses = content.match(addressRegex) || [];
+      const addresses = (content.text.match(addressRegex) || content.html.match(addressRegex) || []);
       item.address = item.address || addresses[0] || '';
-      console.log(`Assigned address for ${item.title}: ${item.address}`);
+      console.log(`Assigned address for ${item.title}: ${item.address || 'N/A'}`);
 
       if (attempt === MAX_RETRIES) {
         console.warn(`No contact info found for ${item.title} after ${MAX_RETRIES} attempts`);
@@ -358,7 +395,7 @@ async function enhanceWithWebsite(browser, item) {
       if (attempt === MAX_RETRIES) {
         console.warn(`Failed to scrape contact info for ${item.title} after ${MAX_RETRIES} attempts`);
       }
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Delay before retry
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
 
