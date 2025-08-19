@@ -32,14 +32,21 @@ RUN apt-get update && apt-get install -y \
 COPY package*.json ./
 RUN npm install
 
-# Install Chrome for Puppeteer explicitly
-RUN npx puppeteer browsers install chrome
+# Create cache directory with appropriate permissions
+RUN mkdir -p /opt/render/.cache/puppeteer && chmod -R 777 /opt/render/.cache/puppeteer
+
+# Install Chrome for Puppeteer explicitly and verify
+RUN npx puppeteer browsers install chrome || echo "Chrome installation failed, checking logs..."
+
+# Debug: List contents of cache directory to verify Chrome installation
+RUN ls -la /opt/render/.cache/puppeteer/chrome || echo "No Chrome binary found in cache"
 
 # Copy the rest of the application code
 COPY . .
 
-# Set environment variable for Puppeteer cache (optional, Render uses /opt/render/.cache/puppeteer by default)
+# Set environment variables for Puppeteer
 ENV PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer
+ENV PUPPETEER_EXECUTABLE_PATH=/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome
 
 # Expose port
 EXPOSE 3000
